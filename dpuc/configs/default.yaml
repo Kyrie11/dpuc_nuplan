@@ -1,0 +1,54 @@
+
+data:
+  raw_root: /dataset/nuplan/data/cache
+  processed_dir: data/processed
+  train_dirs: [train_boston, train_pittsburgh, train_singapore, train_vegas_2]
+  val_dirs: [public_set_val]
+  history_sec: 2.0
+  horizon_sec: 6.0
+  sample_interval_sec: 0.5
+  max_agents: 20
+  radius_m: 60.0
+model:
+  hidden_dim: 256
+  num_heads: 8
+  num_layers: 4
+  dropout: 0.1
+  residual_components: 2
+  max_actions: 9
+  max_slots: 64
+  max_witnesses: 5
+train:
+  batch_size: 64
+  epochs: 30
+  warmup_epochs: 2
+  lr: 0.0002
+  weight_decay: 0.01
+  grad_clip: 1.0
+  num_workers: 0
+  seed: 42
+  ans_weight: 1.0
+  res_weight: 0.5
+  rank_weight: 0.2
+  cal_weight: 0.1
+  selector_epochs: 10
+planner:
+  bank_cap: 64
+  oracle_bank_cap: 256
+  retained_k: 8
+  fallback_k: 12
+  bridge_n: 16
+  oracle_bridge_n: 64
+  action_budget: 9
+  agent_budget: 3
+  beam_width: 32
+  lambda_viol: 5.0
+  witness_gap_temp: 0.15
+  tie_eps: 0.01
+  boundary_gap: 0.10
+  retained_mass_min: 0.8
+  ess_min: 6.0
+  max_norm_weight: 0.35
+  weight_clip: 20.0
+output_dir: outputs/default
+device: cuda

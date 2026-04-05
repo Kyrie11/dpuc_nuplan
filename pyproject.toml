@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dpuc-nuplan"
+version = "0.1.0"
+description = "Decision-Preserving Uncertainty Compression on nuPlan DB files"
+requires-python = ">=3.10"
+dependencies = ["torch", "numpy", "PyYAML", "tqdm"]
+
+[tool.setuptools]
+packages = ["dpuc", "dpuc.data", "dpuc.models", "dpuc.planning", "dpuc.eval", "dpuc.utils"]
