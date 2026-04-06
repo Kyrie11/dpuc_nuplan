@@ -107,112 +107,103 @@ def build_prefixes_for_db(db_path: Path, split: str, cfg) -> List[PrefixSample]:
     try:
         conn = connect(db_path)
         meta = fetch_log_meta(conn)
-        lidar_pcs = fetch_lidar_pcs(conn)
-        ego_map = fetch_ego_poses(conn)
-        tags = fetch_scenario_tags(conn)
-
-        interval_us = int(cfg.data.sample_interval_sec * 1e6)
-        history_us = int(cfg.data.history_sec * 1e6)
-        horizon_us = int(cfg.data.horizon_sec * 1e6)
-
-        timestamps = [int(r['timestamp']) for r in lidar_pcs]
-        if not timestamps:
-            conn.close()
-            return []
-
-        prefixes: List[PrefixSample] = []
-        for row in lidar_pcs:
-            ts = int(row['timestamp'])
-            if ts - timestamps[0] < history_us or timestamps[-1] - ts < horizon_us:
-                continue
-            if (ts - timestamps[0]) % interval_us != 0:
-                continue
-
-            ego = _row_to_ego(ego_map[normalize_token(row['ego_pose_token'])])
-            cur_agents = _rows_to_agents(fetch_boxes_for_lidar_token(conn, normalize_token(row['token'])), ts)
-
-            hist_rows = _slice_rows_by_time(lidar_pcs, timestamps, ts - history_us, ts - interval_us)
-            fut_rows = _slice_rows_by_time(lidar_pcs, timestamps, ts + interval_us, ts + horizon_us)
-            ego_history = [_row_to_ego(ego_map[normalize_token(r['ego_pose_token'])]) for r in hist_rows if
-                           (ts - int(r['timestamp'])) % interval_us == 0]
-            ego_history.append(ego)
-            future_ego = [ego] + [_row_to_ego(ego_map[normalize_token(r['ego_pose_token'])]) for r in fut_rows if
-                                  (int(r['timestamp']) - ts) % interval_us == 0]
-
-            selected_track_tokens = [a.track_id for a in cur_agents]
-            history_boxes = fetch_boxes_in_time_window(conn, ts - history_us, ts, selected_track_tokens)
-            agents_history = {}
-            for hist_box in history_boxes:
-                hist_ts = int(_get_row_value(hist_box, 'lidar_timestamp', ts))
-                if hist_ts > ts or ((ts - hist_ts) % interval_us != 0):
-                    continue
-                hist_agents = _rows_to_agents([hist_box], hist_ts)
-                if not hist_agents:
-                    continue
-                hist_agent = hist_agents[0]
-                agents_history.setdefault(hist_agent.track_id, []).append(hist_agent)
-            for track_id in list(agents_history.keys()):
-                agents_history[track_id] = sorted(agents_history[track_id], key=lambda x: x.t)
-            for a in cur_agents:
-                agents_history.setdefault(a.track_id, []).append(a)
-                agents_history[a.track_id] = sorted(agents_history[a.track_id], key=lambda x: x.t)
-            action_specs = infer_action_library(ego)
-            public_values: List[float] = []
-            for action_idx, _ in action_specs:
-                action_name = \
-                ['lane_follow', 'mild_accel', 'comfort_brake', 'strong_brake', 'creep', 'stop_hold', 'lane_change_left',
-                 'lane_change_right', 'route_commit'][action_idx]
-                public_values.append(
-                    _oracle_value(action_name, ego, future_ego, cur_agents) + (0.2 if action_idx > 5 else 0.0))
-
-            actions: List[ActionSample] = []
-            for action_idx, action_feats in action_specs:
-                action_name = \
-                ['lane_follow', 'mild_accel', 'comfort_brake', 'strong_brake', 'creep', 'stop_hold', 'lane_change_left',
-                 'lane_change_right', 'route_commit'][action_idx]
-                slots = build_slots(ego, cur_agents, action_idx, max_agents=cfg.data.max_agents)
-                witnesses = build_witnesses(public_values, action_idx, top_k=cfg.model.max_witnesses,
-                                            tau_g=cfg.planner.witness_gap_temp)
-                candidate_structures = build_candidate_bank(
-                    ego,
-                    action_index=action_idx,
-                    slots=slots,
-                    witnesses=witnesses,
-                    bank_cap=cfg.planner.bank_cap,
-                    beam_width=cfg.planner.beam_width,
-                    residual_components=cfg.model.residual_components,
-                )
-                actions.append(
-                    ActionSample(
-                        action_index=action_idx,
-                        action_name=action_name,
-                        action_features=action_feats,
-                        slots=slots,
-                        witnesses=witnesses,
-                        candidate_structures=candidate_structures,
-                        oracle_value=_oracle_value(action_name, ego, future_ego, cur_agents),
-                        public_value=public_values[action_idx],
-                    )
-                )
-
-            scenario_type = (tags.get(normalize_token(row['token']), ['unknown']) or ['unknown'])[0]
-            prefixes.append(
-                PrefixSample(
-                    sample_id=f"{db_path.stem}:{ts}",
-                    split=split,
-                    log_name=db_path.stem,
-                    location=str(meta.get('location', 'unknown')),
-                    scenario_type=scenario_type,
-                    timestamp_us=ts,
-                    ego_history=sorted(ego_history, key=lambda x: x.t),
-                    agents_history=agents_history,
-                    future_ego=sorted(future_ego, key=lambda x: x.t),
-                    actions=actions,
-                )
-            )
     except Exception as e:
         print(f"[ERROR] failed db: {db_path}")
-        raise
+    lidar_pcs = fetch_lidar_pcs(conn)
+    ego_map = fetch_ego_poses(conn)
+    tags = fetch_scenario_tags(conn)
+
+    interval_us = int(cfg.data.sample_interval_sec * 1e6)
+    history_us = int(cfg.data.history_sec * 1e6)
+    horizon_us = int(cfg.data.horizon_sec * 1e6)
+
+    timestamps = [int(r['timestamp']) for r in lidar_pcs]
+    if not timestamps:
+        conn.close()
+        return []
+
+    prefixes: List[PrefixSample] = []
+    for row in lidar_pcs:
+        ts = int(row['timestamp'])
+        if ts - timestamps[0] < history_us or timestamps[-1] - ts < horizon_us:
+            continue
+        if (ts - timestamps[0]) % interval_us != 0:
+            continue
+
+        ego = _row_to_ego(ego_map[normalize_token(row['ego_pose_token'])])
+        cur_agents = _rows_to_agents(fetch_boxes_for_lidar_token(conn, normalize_token(row['token'])), ts)
+
+        hist_rows = _slice_rows_by_time(lidar_pcs, timestamps, ts - history_us, ts - interval_us)
+        fut_rows = _slice_rows_by_time(lidar_pcs, timestamps, ts + interval_us, ts + horizon_us)
+        ego_history = [_row_to_ego(ego_map[normalize_token(r['ego_pose_token'])]) for r in hist_rows if (ts - int(r['timestamp'])) % interval_us == 0]
+        ego_history.append(ego)
+        future_ego = [ego] + [_row_to_ego(ego_map[normalize_token(r['ego_pose_token'])]) for r in fut_rows if (int(r['timestamp']) - ts) % interval_us == 0]
+
+        selected_track_tokens = [a.track_id for a in cur_agents]
+        history_boxes = fetch_boxes_in_time_window(conn, ts - history_us, ts, selected_track_tokens)
+        agents_history = {}
+        for hist_box in history_boxes:
+            hist_ts = int(_get_row_value(hist_box, 'lidar_timestamp', ts))
+            if hist_ts > ts or ((ts - hist_ts) % interval_us != 0):
+                continue
+            hist_agents = _rows_to_agents([hist_box], hist_ts)
+            if not hist_agents:
+                continue
+            hist_agent = hist_agents[0]
+            agents_history.setdefault(hist_agent.track_id, []).append(hist_agent)
+        for track_id in list(agents_history.keys()):
+            agents_history[track_id] = sorted(agents_history[track_id], key=lambda x: x.t)
+        for a in cur_agents:
+            agents_history.setdefault(a.track_id, []).append(a)
+            agents_history[a.track_id] = sorted(agents_history[a.track_id], key=lambda x: x.t)
+        action_specs = infer_action_library(ego)
+        public_values: List[float] = []
+        for action_idx, _ in action_specs:
+            action_name = ['lane_follow','mild_accel','comfort_brake','strong_brake','creep','stop_hold','lane_change_left','lane_change_right','route_commit'][action_idx]
+            public_values.append(_oracle_value(action_name, ego, future_ego, cur_agents) + (0.2 if action_idx > 5 else 0.0))
+
+        actions: List[ActionSample] = []
+        for action_idx, action_feats in action_specs:
+            action_name = ['lane_follow','mild_accel','comfort_brake','strong_brake','creep','stop_hold','lane_change_left','lane_change_right','route_commit'][action_idx]
+            slots = build_slots(ego, cur_agents, action_idx, max_agents=cfg.data.max_agents)
+            witnesses = build_witnesses(public_values, action_idx, top_k=cfg.model.max_witnesses, tau_g=cfg.planner.witness_gap_temp)
+            candidate_structures = build_candidate_bank(
+                ego,
+                action_index=action_idx,
+                slots=slots,
+                witnesses=witnesses,
+                bank_cap=cfg.planner.bank_cap,
+                beam_width=cfg.planner.beam_width,
+                residual_components=cfg.model.residual_components,
+            )
+            actions.append(
+                ActionSample(
+                    action_index=action_idx,
+                    action_name=action_name,
+                    action_features=action_feats,
+                    slots=slots,
+                    witnesses=witnesses,
+                    candidate_structures=candidate_structures,
+                    oracle_value=_oracle_value(action_name, ego, future_ego, cur_agents),
+                    public_value=public_values[action_idx],
+                )
+            )
+
+        scenario_type = (tags.get(normalize_token(row['token']), ['unknown']) or ['unknown'])[0]
+        prefixes.append(
+            PrefixSample(
+                sample_id=f"{db_path.stem}:{ts}",
+                split=split,
+                log_name=db_path.stem,
+                location=str(meta.get('location', 'unknown')),
+                scenario_type=scenario_type,
+                timestamp_us=ts,
+                ego_history=sorted(ego_history, key=lambda x: x.t),
+                agents_history=agents_history,
+                future_ego=sorted(future_ego, key=lambda x: x.t),
+                actions=actions,
+            )
+        )
     conn.close()
     return prefixes
 
