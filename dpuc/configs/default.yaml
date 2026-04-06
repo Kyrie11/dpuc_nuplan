@@ -1,9 +1,8 @@
-
 data:
   raw_root: /data0/senzeyu2/dataset/nuplan/data/cache
   processed_dir: data/processed
   train_dirs: [train_boston, train_pittsburgh, train_singapore, train_vegas_2]
-  val_dirs: [val]
+  val_dirs: [public_set_val]
   history_sec: 2.0
   horizon_sec: 6.0
   sample_interval_sec: 0.5
@@ -50,5 +49,20 @@ planner:
   ess_min: 6.0
   max_norm_weight: 0.35
   weight_clip: 20.0
+  interface_variant: ours
+  support_variant: ours
+  bridge_variant: ours
+  individualization_variant: ours
+  planner_variant: ours
+  use_model_runtime: true
+  use_uplift_term: true
+  use_rescue_support: true
+  use_local_closure_refresh: true
+  use_correction_fallback: true
+  dbi_exact: true
+  eval_repeats: 4
+  mc_seeds: 4
+  boundary_mass_topk: 3
+  confidence_margin: 0.15
 output_dir: outputs/default
 device: cuda

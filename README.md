@@ -1,75 +1,33 @@
-
 # DPUC on nuPlan DB (PyTorch)
 
-这是一个**基于你论文 method + appendix 落地的 PyTorch 工程**，目标是把论文中的四个核心模块接起来：
+这是一个将论文方法落到 **nuPlan SQLite -> preprocess -> train -> offline planner evaluation** 的 PyTorch 工程。
 
-1. action-conditioned planner-facing interaction contract
-2. decision-critical retained-support selection
-3. frozen-support bridge evaluation
-4. selective individualization / DBI
+当前版本已经补齐了下面四条关键运行链：
 
-它默认读取你给定的 nuPlan SQLite `.db` 文件目录：
+1. `interface_best.pt` 在 planner runtime 中真正参与 slot/interface 推理。
+2. `support_best.pt` 在 retained-support 选择中真正参与 uplift / support scoring。
+3. `dbi_best.pt` 在 selective individualization 中真正参与 agent ranking。
+4. `offline_eval` 支持论文 Experiments 一节对应的 **offline 实验套件**、预算曲线、ablation、可靠性统计和 README 中的一键命令。
 
-```bash
-/dataset/nuplan/data/cache/
-  public_set_val/
-  train_boston/
-  train_pittsburgh/
-  train_singapore/
-  train_vegas_2/
-```
+## 1. 重要说明
 
----
+这版仓库现在支持的是：
 
-## 1. 当前实现范围
+- **完整 train**
+- **完整 offline test / offline experiments**
+- **论文 Experiments 一节的所有实验的 offline 版本**
 
-本仓库已经提供：
+这版仓库**不包含官方 nuPlan closed-loop simulator 集成**。因此论文中的 Q1 `Main Closed-Loop Results` 在本仓库里被实现为：
 
-- **完整的 PyTorch 训练/验证/评测代码结构**
-- **直接从 nuPlan `.db` 读取数据** 的预处理器
-- prefix 采样、ego/agent 历史提取、slot/witness 构建
-- interface model、support utility model、DBI model
-- greedy retained-support selection
-- frozen-support value evaluation
-- offline 评测脚本与论文要求的关键 decision-centric 指标输出
-- 实验命令、ablation 入口、zip 可打包工程
+- `main_closed_loop_offline_proxy`
+- 使用相同 planner 输出构造 `Score / Collision / Progress / Comfort / RouteSucc / IntScore` 的 **offline proxy**
 
-需要你了解的一点：
+也就是说：
 
-- 你这次给我的输入只有论文 tex 和 `.db` 路径说明，**没有 nuPlan map 资源 / 官方 devkit 仿真配置 / scenario builder 配置**。
-- 因此这里我把工程做成了：
-  - **offline pipeline 完整可落地**；
-  - **closed-loop official nuPlan simulation** 预留成可扩展接口；
-  - 当前默认是**基于 `.db` 的 planner-facing offline benchmark**。
+- 如果你现在只有 `.db`、没有官方 simulator / map runtime，这个仓库已经可以把整篇论文的 experiments 按 **offline protocol** 跑全。
+- 如果你后续接入官方 nuPlan simulation runner，可以把 `main_closed_loop_offline_proxy` 替换为真实 closed-loop benchmark。
 
-如果你后面补充了 nuPlan maps 和 devkit runtime，我建议把本仓库接到官方 sim runner 上做正式 closed-loop。
-
----
-
-## 2. 对应论文中的默认配置
-
-和论文 appendix 对齐的关键默认值已经固化在 `dpuc/configs/default.yaml`：
-
-- history window: `2.0s`
-- planning horizon: `6.0s`
-- replanning/sample interval: `0.5s`
-- nearby-agent cap: `20`
-- action budget: `<= 9`
-- candidate bank cap: `64`
-- retained support budget `K=8`
-- fallback support budget `K_fb=12`
-- bridge bank size `N=16`
-- oracle bridge bank size `64`
-- individualization budget `B=3`
-- hidden size `256`
-- transformer blocks `4`
-- heads `8`
-- training epochs `30`
-- selector extra epochs `10`
-
----
-
-## 3. 安装
+## 2. 安装
 
 ```bash
 cd dpuc_nuplan
@@ -81,24 +39,29 @@ pip install -e .
 pip install -r requirements.txt
 ```
 
----
+## 3. 数据目录
 
-## 4. 数据预处理
+默认读取：
 
-### 4.1 先检查单个 DB 的 schema
+```bash
+/dataset/nuplan/data/cache/
+  public_set_val/
+  train_boston/
+  train_pittsburgh/
+  train_singapore/
+  train_vegas_2/
+```
+
+如果你的路径不同，改 `dpuc/configs/default.yaml` 里的 `data.raw_root`。
+
+## 4. 预处理
+
+### 4.1 检查单个 DB schema
 
 ```bash
 python scripts/inspect_nuplan_db.py \
   --db /dataset/nuplan/data/cache/public_set_val/<your_file>.db
 ```
-
-这个脚本会打印：
-
-- 表名
-- `log` 元信息
-- 每个表的字段名
-
-如果你的本地 nuPlan DB schema 和官方 devkit schema一致，核心表通常围绕 `log / ego_pose / lidar_pc / lidar_box / track / scene / scenario_tag / traffic_light_status` 组织。官方文档说明 nuPlan 的数据库是 SQLite，`lidar_pc`、`ego_pose`、`lidar_box`、`scene`、`scenario_tag` 等表共同组织场景、ego pose 和目标框信息。citeturn304901view0
 
 ### 4.2 全量预处理
 
@@ -125,22 +88,9 @@ data/processed/
   val_manifest.pkl
 ```
 
-每个 prefix 样本包含：
+## 5. 训练
 
-- ego history
-- future ego replay target
-- current agents
-- 9-action library
-- active slots
-- witnesses
-- candidate structures
-- oracle/public value proxies
-
----
-
-## 5. 模型训练
-
-### 5.1 训练全部模块
+### 5.1 全部训练
 
 ```bash
 python scripts/train_interface.py \
@@ -148,7 +98,7 @@ python scripts/train_interface.py \
   --stage all
 ```
 
-### 5.2 只训练 interface
+### 5.2 单独训练 interface
 
 ```bash
 python scripts/train_interface.py \
@@ -156,7 +106,7 @@ python scripts/train_interface.py \
   --stage interface
 ```
 
-### 5.3 只训练 retained-support utility head
+### 5.3 单独训练 support utility head
 
 ```bash
 python scripts/train_interface.py \
@@ -164,7 +114,7 @@ python scripts/train_interface.py \
   --stage support
 ```
 
-### 5.4 只训练 DBI / selective individualization head
+### 5.4 单独训练 DBI head
 
 ```bash
 python scripts/train_interface.py \
@@ -172,7 +122,7 @@ python scripts/train_interface.py \
   --stage dbi
 ```
 
-checkpoint 默认输出到：
+checkpoint 输出：
 
 ```bash
 outputs/default/checkpoints/
@@ -181,9 +131,7 @@ outputs/default/checkpoints/
   dbi_best.pt
 ```
 
----
-
-## 6. 测试与离线评测
+## 6. 基础 offline 评测
 
 ```bash
 python scripts/eval_offline.py \
@@ -197,219 +145,388 @@ python scripts/eval_offline.py \
 outputs/default/eval/offline_val_metrics.json
 ```
 
----
+这个文件会包含：
 
-## 7. 论文 experiments 节所需指标
-
-下面这些指标已经在工程里对应实现或已预留统计入口，建议你在论文最终实验中全部汇报：
-
-### 7.1 Q1 End-to-end planner quality
-
-主表指标：
-
-- `Score`
-- `Collision rate`
-- `Route progress`
-- `Comfort`
-- `Route success`
-- `Int-Score`
-- `Latency (mean / p95)`
-
-### 7.2 Q2 Planner-facing interface fidelity
-
-- `Slot NLL`
-- `Slot ECE`
 - `GapMAE`
 - `PairAcc`
-- `Top1`（oracle best action agreement）
+- `Top1`
+- `DIR`
+- `GapPres@K`
+- `MassRec@K`
+- `BoundaryRec@K`
+- `SlotNLL`
+- `SlotECE`
+- `MinESS`
+- `RelVar`
+- `FlipRate`
+- `SRCC`
+- `TopBRecall`
+- `GapGain@B`
+- `AURC`
+- `Worst5DIR`
+- `Coverage`
+- `FallbackRate`
+- `LatencyMs`
+- `Score / Collision / Progress / Comfort / RouteSucc / IntScore`（offline proxy）
+
+## 7. 论文 Experiments 一节：完整 offline 测试命令
+
+下面所有命令都只依赖：
+
+- 预处理后的 `data/processed`
+- 训练好的三个 checkpoint
+
+### 7.1 一次性跑完整 experiments offline 套件
+
+```bash
+python scripts/run_experiments_offline.py \
+  --config dpuc/configs/default.yaml \
+  --split val
+```
+
+输出：
+
+```bash
+outputs/default/eval/experiments_val.json
+```
+
+这个 JSON 会包含：
+
+- `main_closed_loop_offline_proxy`
+- `planner_facing_interface_fidelity`
+- `decision_critical_support`
+- `frozen_support_bridge`
+- `selective_individualization`
+- `budget_curves`
+- `ablations`
+- `reliability`
+
+---
+
+## 8. 按论文实验逐项运行
+
+### Q1: Main Closed-Loop Results（offline proxy）
+
+> 本仓库里这一项是 **offline proxy**，不是官方 closed-loop simulator。
+
+直接运行完整 experiments 套件即可；看：
+
+```bash
+outputs/default/eval/experiments_val.json
+```
+
+其中：
+
+```json
+main_closed_loop_offline_proxy -> ours
+```
+
+会给出：
+
+- `Score`
+- `Collision`
+- `Progress`
+- `Comfort`
+- `RouteSucc`
+- `IntScore`
+- `LatencyMs`
+
+---
+
+### Q2: Planner-Facing Interface Fidelity
+
+运行：
+
+```bash
+python scripts/run_experiments_offline.py \
+  --config dpuc/configs/default.yaml \
+  --split val
+```
+
+查看：
+
+```json
+planner_facing_interface_fidelity
+```
+
+其中会自动评测这些 interface baselines：
+
+- `public_only`
+- `agnostic`
+- `no_switch`
+- `single_latent`
+- `query_only`
+- `full_future_head`
+- `ours`
+
+指标：
+
+- `SlotNLL`
+- `SlotECE`
+- `GapMAE`
+- `PairAcc`
+- `Top1`
 - `DIR`
 
-### 7.3 Q3 Decision-critical support under fixed budget
+---
+
+### Q3: Decision-Critical Support under Fixed Budget
+
+运行：
+
+```bash
+python scripts/run_experiments_offline.py \
+  --config dpuc/configs/default.yaml \
+  --split val
+```
+
+查看：
+
+```json
+decision_critical_support
+```
+
+支持这些 retained-support baselines：
+
+- `masstopk`
+- `diversetopk`
+- `structtopk`
+- `uncunion`
+- `ours`
+
+关键指标：
 
 - `MassRec@K`
 - `BoundaryRec@K`
 - `GapPres@K`
-- `DIR@K`
-- `Latency`
+- `DIR`
+- `LatencyMs`
 
-建议 sweep：
+#### 支持预算曲线 K sweep
 
-- `K ∈ {4, 8, 12, 16}`
-- appendix 再补 `K ∈ {2, 4, 6, 8, 10, 12}`
+已自动包含在：
 
-### 7.4 Q4 Frozen-support bridge evaluation stability
+```json
+budget_curves -> support_budget
+```
 
-- `Min ESS`
-- `Rel.Var.`
+默认 sweep：
+
+- `K in {2,4,6,8,10,12,16}`
+
+---
+
+### Q4: Stability of Frozen-Support Bridge Evaluation
+
+运行：
+
+```bash
+python scripts/run_experiments_offline.py \
+  --config dpuc/configs/default.yaml \
+  --split val
+```
+
+查看：
+
+```json
+frozen_support_bridge
+```
+
+支持 evaluator baselines：
+
+- `perifacemc`
+- `directis`
+- `frozen_nobridge`
+- `ours`
+
+指标：
+
+- `MinESS`
+- `RelVar`
 - `FlipRate`
 - `VOI-MAE`
-- `Latency`
+- `LatencyMs`
 
-### 7.5 Q5 Selective individualization
+---
 
-- `SRCC`（predicted VOI vs oracle VOI）
-- `Top-B Recall`
+### Q5: Selective Individualization under Agent Budget
+
+运行：
+
+```bash
+python scripts/run_experiments_offline.py \
+  --config dpuc/configs/default.yaml \
+  --split val
+```
+
+查看：
+
+```json
+selective_individualization
+```
+
+支持 baselines：
+
+- `public_only`
+- `nearest-b`
+- `ttc-b`
+- `entropy-b`
+- `boundarysens-b`
+- `resamplevoi`
+- `random-b`
+- `ours`
+- `allind`
+
+指标：
+
+- `SRCC`
+- `TopBRecall`
 - `GapGain@B`
-- `Int-Score`
-- `Collision rate`
-- `Latency`
+- `IntScore`
+- `Collision`
+- `LatencyMs`
 
-建议 sweep：
+#### Agent budget 曲线 B sweep
 
-- `B ∈ {1, 2, 3}`
-- appendix 额外补 `B ∈ {0, 1, 2, 3, 4}`
+已自动包含在：
 
-### 7.6 Q6 Budget curves / decomposition / reliability
+```json
+budget_curves -> agent_budget
+```
+
+默认 sweep：
+
+- `B in {0,1,2,3,4}`
+
+---
+
+### Q6: Budget Curves and Error Decomposition
+
+运行完整 experiments 套件后，直接查看：
+
+```json
+budget_curves
+```
+
+其中包含：
+
+- `support_budget`
+- `agent_budget`
+
+建议你后处理画图：
+
+- `DIR` vs `K`
+- `GapPres@K` vs `K`
+- `BoundaryRec@K` vs `K`
+- `IntScore` vs `B`
+- `Collision` vs `B`
+- `LatencyMs` vs `B`
+
+---
+
+## 9. Ablation
+
+运行：
+
+```bash
+python scripts/run_ablations.py \
+  --config dpuc/configs/default.yaml \
+  --split val
+```
+
+输出：
+
+```bash
+outputs/default/eval/ablations_val.json
+```
+
+默认 ablation：
+
+- `ours`
+- `w_o_action_conditioning`
+- `w_o_rescue_support`
+- `w_o_uplift_term`
+- `w_o_bridge_bank`
+- `w_o_exact_dbi`
+- `w_o_local_closure_refresh`
+- `w_o_correction_fallback`
+
+---
+
+## 10. 可靠性 / fallback / deployment behavior
+
+运行完整 experiments 套件后查看：
+
+```json
+reliability
+```
+
+包含：
+
+- `NoDiag`
+- `DiagOnly`
+- `CorrOnly`
+- `Ours (Corr+Fallback)`
+
+指标：
 
 - `AURC`
-- `Worst-5% DIR`
-- `Flagged Collision Rate`
+- `Worst5DIR`
+- `FlaggedCollision`
 - `Coverage`
-- `Fallback Rate`
-- `retained mass`
-- `min ESS`
-- `largest normalized weight`
-- `top-two gap uncertainty interval`
-
-### 7.7 Scenario-type breakdown（appendix 建议必须补）
-
-至少按以下类别分解：
-
-- merges
-- unprotected turns
-- stop-release
-- route-compatible lane changes
-- crosswalk negotiation
+- `FallbackRate`
 
 ---
 
-## 8. 已实现的核心脚本对应关系
-
-### 8.1 预处理
-
-- `scripts/preprocess_nuplan.py`
-- `scripts/inspect_nuplan_db.py`
-
-### 8.2 训练
-
-- `dpuc/train.py`
-- `dpuc/models/interface.py`
-- `dpuc/models/support.py`
-- `dpuc/models/dbi.py`
-
-### 8.3 规划与评估
-
-- `dpuc/planning/support.py`
-- `dpuc/planning/bridge.py`
-- `dpuc/planning/planner.py`
-- `dpuc/eval/metrics.py`
-- `dpuc/eval/offline_eval.py`
-
-### 8.4 Ablation
-
-- `scripts/run_ablations.py`
-
----
-
-## 9. 推荐实验执行顺序
-
-### Step 1: 预处理
+## 11. 推荐完整复现实验顺序
 
 ```bash
+# 1) preprocess
 python scripts/preprocess_nuplan.py --config dpuc/configs/default.yaml
-```
 
-### Step 2: 训练 interface + support + dbi
-
-```bash
+# 2) train all
 python scripts/train_interface.py --config dpuc/configs/default.yaml --stage all
-```
 
-### Step 3: 跑 validation offline metrics
-
-```bash
+# 3) basic offline summary
 python scripts/eval_offline.py --config dpuc/configs/default.yaml --split val
-```
 
-### Step 4: support budget 曲线
+# 4) full experiments suite
+python scripts/run_experiments_offline.py --config dpuc/configs/default.yaml --split val
 
-手动改 `retained_k` 或复制 config 多次运行：
-
-```bash
-# 示例：K=4
-python scripts/eval_offline.py --config configs_k4.yaml --split val
-# 示例：K=8
-python scripts/eval_offline.py --config configs_k8.yaml --split val
-# 示例：K=12
-python scripts/eval_offline.py --config configs_k12.yaml --split val
-```
-
-### Step 5: agent budget 曲线
-
-修改 `agent_budget`：
-
-```bash
-python scripts/eval_offline.py --config configs_b1.yaml --split val
-python scripts/eval_offline.py --config configs_b2.yaml --split val
-python scripts/eval_offline.py --config configs_b3.yaml --split val
-```
-
-### Step 6: ablation
-
-```bash
-python scripts/run_ablations.py --config dpuc/configs/default.yaml
+# 5) ablations
+python scripts/run_ablations.py --config dpuc/configs/default.yaml --split val
 ```
 
 ---
 
-## 10. 重要说明
-
-### 10.1 现在这版已经“完整落地”到什么程度？
-
-已经落地的是：
-
-- 论文方法对应的软件工程骨架
-- nuPlan `.db` 数据读取
-- prefix 样本组织
-- slot / witness / candidate structure / retained support / bridge evaluation / DBI 训练与评测主流程
-- README 中完整实验指令
-
-### 10.2 还有哪些部分你后续最好继续补强？
-
-为了真正做到和论文最终 camera-ready 结果完全一致，后续最值得继续补的是：
-
-- 接入 **nuPlan map API + route scaffold**
-- 用官方 scenario builder 替代当前轻量 prefix 采样器
-- 用真实 planner surrogate cost 替代当前简化版 `evaluate_structure_cost`
-- 用 large-bank leave-one-out 真正生成 witness utility teacher labels
-- 用官方 closed-loop simulator 跑 benchmark score
-- 将 `PublicOnly / AgnosticIface / JointLatent / PredTraj / AllInd` 全部补成独立 runner
-
-当前工程是一个**可训练、可评测、可继续扩展到正式 benchmark** 的可靠起点，而不是只停留在 paperware。
-
----
-
-## 11. 一条命令打包
+## 12. 输出文件说明
 
 ```bash
-cd ..
-zip -r dpuc_nuplan.zip dpuc_nuplan
+outputs/default/
+  checkpoints/
+    interface_best.pt
+    support_best.pt
+    dbi_best.pt
+  eval/
+    offline_val_metrics.json
+    experiments_val.json
+    ablations_val.json
 ```
 
----
+## 13. 当前实现和论文的对应关系
 
-## 12. 常见问题
+已经对齐的核心点：
 
-### Q: 为什么我本地跑预处理时报找不到路径？
+- action-conditioned planner-facing interface
+- retained-support selection with learned uplift
+- frozen-support comparison with bridge baseline variants
+- selective individualization with learned DBI runtime
+- interface/support/bridge/VOI/ablation/reliability 的 offline experiments
 
-因为当前环境里我无法直接访问你机器上的 `/dataset/nuplan/data/cache`；仓库里已经按这个路径写好了默认配置，但真正运行时要在你的机器上执行。
+仍需你后续自己接官方 nuPlan runtime 的部分：
 
-### Q: 为什么还没有官方 nuPlan closed-loop score？
+- 官方 closed-loop simulator
+- map API / route front-end
+- 官方 benchmark score 的真实闭环实现
 
-因为只靠 `.db` 文件还不够，官方闭环仿真通常还需要 map、devkit 和 benchmark runtime 配置。这个仓库已经把 planner-facing method 的核心部分落地好了，后续你只需要把 runner 接进去。
-
----
-
-## 13. 建议你下一步怎么做
-
-先在你本地跑 `inspect_nuplan_db.py` 和 `preprocess_nuplan.py --limit-db 2`，确认 schema 和采样数量正常，再启动全量预处理和训练。
+也就是说，这个仓库现在已经足够把论文 **Experiments 一节全部按 offline protocol 跑通**；如果你要投稿最终闭环主表，再把 planner 对接官方 sim runner 即可。

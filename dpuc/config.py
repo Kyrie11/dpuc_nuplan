@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -65,6 +64,21 @@ class PlannerConfig:
     ess_min: float = 6.0
     max_norm_weight: float = 0.35
     weight_clip: float = 20.0
+    interface_variant: str = "ours"
+    support_variant: str = "ours"
+    bridge_variant: str = "ours"
+    individualization_variant: str = "ours"
+    planner_variant: str = "ours"
+    use_model_runtime: bool = True
+    use_uplift_term: bool = True
+    use_rescue_support: bool = True
+    use_local_closure_refresh: bool = True
+    use_correction_fallback: bool = True
+    dbi_exact: bool = True
+    eval_repeats: int = 4
+    mc_seeds: int = 4
+    boundary_mass_topk: int = 3
+    confidence_margin: float = 0.15
 
 @dataclass
 class ExperimentConfig:
