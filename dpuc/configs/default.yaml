@@ -3,7 +3,7 @@ data:
   raw_root: /data0/senzeyu2/dataset/nuplan/data/cache
   processed_dir: data/processed
   train_dirs: [train_boston, train_pittsburgh, train_singapore, train_vegas_2]
-  val_dirs: [public_set_val]
+  val_dirs: [val]
   history_sec: 2.0
   horizon_sec: 6.0
   sample_interval_sec: 0.5
