@@ -32,6 +32,8 @@ def train_interface(cfg):
     val_ds = InterfaceDataset(Path(cfg.data.processed_dir) / 'val')
     train_loader = DataLoader(train_ds, batch_size=cfg.train.batch_size, shuffle=True, num_workers=cfg.train.num_workers)
     val_loader = DataLoader(val_ds, batch_size=cfg.train.batch_size, shuffle=False, num_workers=cfg.train.num_workers)
+    if len(train_ds) == 0 or len(val_ds) == 0:
+        raise RuntimeError('Processed train/val splits are empty. Run preprocessing first.')
     device = torch.device(cfg.device if torch.cuda.is_available() else 'cpu')
     model = InterfaceModel(hidden_dim=cfg.model.hidden_dim, num_heads=cfg.model.num_heads, num_layers=cfg.model.num_layers, residual_components=cfg.model.residual_components).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
@@ -78,6 +80,8 @@ def train_support(cfg):
     set_seed(cfg.train.seed)
     ds = SupportDataset(Path(cfg.data.processed_dir) / 'train')
     loader = DataLoader(ds, batch_size=cfg.train.batch_size, shuffle=True)
+    if len(ds) == 0:
+        raise RuntimeError('Processed support dataset is empty. Run preprocessing first.')
     device = torch.device(cfg.device if torch.cuda.is_available() else 'cpu')
     sample = ds[0]
     model = SupportUtilityModel(sample['feat'].numel(), sample['target'].numel(), cfg.model.hidden_dim).to(device)
@@ -90,7 +94,8 @@ def train_support(cfg):
             feat = batch['feat'].to(device)
             target = batch['target'].to(device)
             pred = model(feat)
-            loss = mse(pred, target)
+            weights = batch['weights'].to(device)
+            loss = ((pred - target) ** 2 * torch.clamp(weights + 0.1, max=1.0)).mean()
             optimizer.zero_grad(); loss.backward(); optimizer.step()
     torch.save(model.state_dict(), ckpt_dir / 'support_best.pt')
     return ckpt_dir / 'support_best.pt'
@@ -100,18 +105,24 @@ def train_dbi(cfg):
     set_seed(cfg.train.seed)
     ds = DBIDataset(Path(cfg.data.processed_dir) / 'train')
     loader = DataLoader(ds, batch_size=cfg.train.batch_size, shuffle=True)
+    if len(ds) == 0:
+        raise RuntimeError('Processed DBI dataset is empty. Run preprocessing first.')
     device = torch.device(cfg.device if torch.cuda.is_available() else 'cpu')
     model = DBIModel(in_dim=ds[0]['feat'].numel()).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
     mse = nn.MSELoss()
     ckpt_dir = ensure_dir(Path(cfg.output_dir) / 'checkpoints')
     for epoch in range(10):
+        model.train()
         for batch in tqdm(loader, desc=f'dbi-train-{epoch}'):
             feat = batch['feat'].to(device)
             target = batch['target'].to(device)
             pred = model(feat)
             loss = mse(pred, target)
-            optimizer.zero_grad(); loss.backward(); optimizer.step()
+            optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.train.grad_clip)
+            optimizer.step()
     torch.save(model.state_dict(), ckpt_dir / 'dbi_best.pt')
     return ckpt_dir / 'dbi_best.pt'
 

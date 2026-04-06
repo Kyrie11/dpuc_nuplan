@@ -19,7 +19,7 @@ def main() -> None:
     args = parser.parse_args()
     cfg = load_config(args.config)
     samples = _flatten_processed(Path(cfg.data.processed_dir) / args.split)
-    metrics = {'GapMAE': [], 'PairAcc': [], 'Top1': [], 'DIR': [], 'GapPres@K': [], 'MinESS': []}
+    metrics = {'GapMAE': [], 'PairAcc': [], 'Top1': [], 'DIR': [], 'GapPres@K': [], 'MinESS': [], 'FallbackRate': [], 'RefinedAgents': []}
     for sample in tqdm(samples, desc='offline-eval'):
         result = run_planner(sample, cfg.planner)
         ref = np.asarray([a['oracle_value'] for a in result['actions']], dtype=np.float32)
@@ -30,6 +30,8 @@ def main() -> None:
         metrics['DIR'].append(dir_metric(ref, pred))
         metrics['GapPres@K'].append(gap_preservation(ref, pred, cfg.planner.boundary_gap))
         metrics['MinESS'].append(min(a['ess'] for a in result['actions']))
+        metrics['FallbackRate'].append(float(result['fallback_used']))
+        metrics['RefinedAgents'].append(float(len(result.get('refined_agents', []))))
     summary = {k: float(np.mean(v)) if v else 0.0 for k, v in metrics.items()}
     out_dir = ensure_dir(Path(cfg.output_dir) / 'eval')
     save_json(summary, out_dir / f'offline_{args.split}_metrics.json')

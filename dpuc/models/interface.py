@@ -5,7 +5,7 @@ from torch import nn
 from dpuc.models.common import MLP, TinyTransformer
 
 class InterfaceModel(nn.Module):
-    def __init__(self, action_dim: int = 5, slot_dim: int = 9, hidden_dim: int = 256, num_heads: int = 8, num_layers: int = 4, residual_components: int = 2):
+    def __init__(self, action_dim: int = 5, slot_dim: int = 12, hidden_dim: int = 256, num_heads: int = 8, num_layers: int = 4, residual_components: int = 2):
         super().__init__()
         self.action_proj = nn.Linear(action_dim, hidden_dim)
         self.slot_proj = nn.Linear(slot_dim, hidden_dim)
